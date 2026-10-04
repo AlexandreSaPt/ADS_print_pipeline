@@ -1,0 +1,5 @@
+streamlit>=1.37
+scikit-rf
+pandas
+numpy
+matplotlib

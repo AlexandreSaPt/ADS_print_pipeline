@@ -1,0 +1,36 @@
+{
+  "n_plots": 1,
+  "plots": [
+    {
+      "name": "Plot 1",
+      "type": "Smith",
+      "x": "Frequency",
+      "x_unit": "GHz",
+      "x_scale": "linear",
+      "y": [
+        "S11 mag"
+      ],
+      "y_units": {
+        "S11 mag": "dB"
+      },
+      "y_scale": "linear",
+      "styles": [
+        {
+          "color": "#1f77b4",
+          "width": 0.5,
+          "style": "dot"
+        },
+        {
+          "color": "#d62728",
+          "width": 0.5,
+          "style": "dot"
+        },
+        {
+          "color": "#2ca02c",
+          "width": 0.5,
+          "style": "dot"
+        }
+      ]
+    }
+  ]
+}
