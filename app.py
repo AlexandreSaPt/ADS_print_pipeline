@@ -24,6 +24,8 @@ VARS = {
     "S11 phase": ["deg", "rad"],
 }
 LINESTYLES = {"line": "-", "dashed": "--", "dot": ":"}
+# image edges in data units [left, right, bottom, top], calibrated for smith_diagram.png
+SMITH_EXTENT = [-1.18423, 1.18980, -1.18918, 1.18485]
 PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b"]
 
 
@@ -101,7 +103,7 @@ def draw(c):
     fig, ax = plt.subplots(figsize=(8, 6))
     if c["type"] == "Smith":
         if SMITH_IMG.exists():
-            ax.imshow(mpimg.imread(SMITH_IMG), extent=[-1, 1, -1, 1], zorder=0)
+            ax.imshow(mpimg.imread(SMITH_IMG), extent=SMITH_EXTENT, zorder=0)
         else:
             st.warning(f"{SMITH_IMG.name} not found next to app.py")
         ax.set_xlim(-1.05, 1.05)
