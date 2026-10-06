@@ -106,8 +106,9 @@ def draw(c):
             ax.imshow(mpimg.imread(SMITH_IMG), extent=SMITH_EXTENT, zorder=0)
         else:
             st.warning(f"{SMITH_IMG.name} not found next to app.py")
-        ax.set_xlim(-1.05, 1.05)
-        ax.set_ylim(-1.05, 1.05)
+        # show the whole image: limits follow the calibrated extent
+        ax.set_xlim(SMITH_EXTENT[0], SMITH_EXTENT[1])
+        ax.set_ylim(SMITH_EXTENT[2], SMITH_EXTENT[3])
         ax.set_aspect("equal")
         ax.axis("off")
         combos = [(s, "S11") for s in c["sims"]]
