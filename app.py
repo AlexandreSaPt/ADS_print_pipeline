@@ -1,4 +1,4 @@
-"""S1P Plotter - run with:  streamlit run app.py"""
+"""S-parameter Plotter - run with:  streamlit run app.py"""
 import json
 import os
 import tempfile
@@ -15,14 +15,6 @@ st.set_page_config(page_title="S1P Plotter", layout="wide")
 
 SMITH_IMG = Path(__file__).parent / "smith_diagram.png"
 FREQ_DIV = {"Hz": 1, "kHz": 1e3, "MHz": 1e6, "GHz": 1e9}
-# variable -> allowed units (first one is the default)
-VARS = {
-    "Frequency": ["GHz", "MHz", "kHz", "Hz"],
-    "S11 re": ["linear"],
-    "S11 im": ["linear"],
-    "S11 mag": ["dB", "linear"],
-    "S11 phase": ["deg", "rad"],
-}
 LINESTYLES = {"line": "-", "dashed": "--", "dot": ":"}
 # image edges in data units [left, right, bottom, top], calibrated for smith_diagram.png
 SMITH_EXTENT = [-1.18423, 1.18980, -1.18918, 1.18485]
@@ -30,31 +22,58 @@ PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b"]
 
 
 # ---------- data ----------
-def load_s1p(uploaded) -> pd.DataFrame:
-    """Read one uploaded .s1p with scikit-rf and return a DataFrame."""
+EXTS = [f"s{n}p" for n in range(1, 17)]  # .s1p ... .s16p
+
+
+def units_for(var):
+    if var == "Frequency":
+        return ["GHz", "MHz", "kHz", "Hz"]
+    if var.endswith("mag"):
+        return ["dB", "linear"]
+    if var.endswith("phase"):
+        return ["deg", "rad"]
+    return ["linear"]
+
+
+def available_vars():
+    return [c for c in ss.df.columns if c != "Sim name"]
+
+
+def available_sparams():
+    return list(dict.fromkeys(c.split()[0] for c in available_vars() if c.startswith("S")))
+
+
+def get_combos(c):
+    if c["type"] == "Smith":
+        return [(s, p) for s in c["sims"] for p in c.get("smith_s", ["S11"])]
+    return [(s, y) for s in c["sims"] for y in c["y"]]
+
+def load_snp(uploaded) -> pd.DataFrame:
+    """Read one uploaded Touchstone file (.s1p, .s2p, ...) with scikit-rf."""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, uploaded.name)
         with open(path, "wb") as fh:
             fh.write(uploaded.getvalue())
         ntw = rf.Network(path)
-    s = ntw.s[:, 0, 0]
-    return pd.DataFrame({
-        "Sim name": uploaded.name,
-        "Frequency": ntw.f,  # Hz
-        "S11 re": s.real,
-        "S11 im": s.imag,
-        "S11 mag": np.abs(s),  # linear
-        "S11 phase": np.angle(s, deg=True),  # deg
-    })
+    data = {"Sim name": uploaded.name, "Frequency": ntw.f}  # Hz
+    for i in range(ntw.nports):
+        for j in range(ntw.nports):
+            s = ntw.s[:, i, j]
+            n = f"S{i + 1}{j + 1}"
+            data[f"{n} re"] = s.real
+            data[f"{n} im"] = s.imag
+            data[f"{n} mag"] = np.abs(s)  # linear
+            data[f"{n} phase"] = np.angle(s, deg=True)  # deg
+    return pd.DataFrame(data)
 
 
 def convert(values, var, unit):
     v = np.asarray(values, dtype=float)
     if var == "Frequency":
         return v / FREQ_DIV[unit]
-    if var == "S11 mag" and unit == "dB":
+    if var.endswith("mag") and unit == "dB":
         return 20 * np.log10(np.maximum(v, 1e-12))
-    if var == "S11 phase" and unit == "rad":
+    if var.endswith("phase") and unit == "rad":
         return np.deg2rad(v)
     return v
 
@@ -71,7 +90,7 @@ def new_plot():
     pid = ss.next_id
     ss.next_id += 1
     ss.plots[pid] = dict(
-        name=f"Plot {pid}", type="Normal", sims=[], x="Frequency", x_unit="GHz",
+        name=f"Plot {pid}", type="Normal", sims=[], smith_s=["S11"], x="Frequency", x_unit="GHz",
         x_scale="linear", y=["S11 mag"], y_units={"S11 mag": "dB"},
         y_scale="linear", lines={},
     )
@@ -79,17 +98,14 @@ def new_plot():
 
 
 # ---------- template export / import ----------
-TPL_KEYS = ("name", "type", "x", "x_unit", "x_scale", "y", "y_units", "y_scale")
+TPL_KEYS = ("name", "type", "smith_s", "x", "x_unit", "x_scale", "y", "y_units", "y_scale")
 
 
 def export_template() -> str:
     """Plot layout only: no sims and no legend names. Line styles are kept in order."""
     out = []
     for c in ss.plots.values():
-        if c["type"] == "Smith":
-            combos = [(s, "S11") for s in c["sims"]]
-        else:
-            combos = [(s, y) for s in c["sims"] for y in c["y"]]
+        combos = get_combos(c)
         styles = [{k: c["lines"][f"{s}|{y}"][k] for k in ("color", "width", "style", "marker_size")
                    if k in c["lines"][f"{s}|{y}"]}
                   for s, y in combos if f"{s}|{y}" in c["lines"]]
@@ -106,14 +122,11 @@ def draw(c):
             ax.imshow(mpimg.imread(SMITH_IMG), extent=SMITH_EXTENT, zorder=0)
         else:
             st.warning(f"{SMITH_IMG.name} not found next to app.py")
-        # show the whole image: limits follow the calibrated extent
-        ax.set_xlim(SMITH_EXTENT[0], SMITH_EXTENT[1])
+        ax.set_xlim(SMITH_EXTENT[0], SMITH_EXTENT[1])  # show the whole image
         ax.set_ylim(SMITH_EXTENT[2], SMITH_EXTENT[3])
         ax.set_aspect("equal")
         ax.axis("off")
-        combos = [(s, "S11") for s in c["sims"]]
-    else:
-        combos = [(s, y) for s in c["sims"] for y in c["y"]]
+    combos = get_combos(c)
     for s, y in combos:
         d = df[df["Sim name"] == s]
         ln = c["lines"].get(f"{s}|{y}", {})
@@ -121,15 +134,15 @@ def draw(c):
                   ls=LINESTYLES[ln.get("style", "line")],
                   marker="o", ms=ln.get("marker_size", 3), label=ln.get("label", s), zorder=2)
         if c["type"] == "Smith":
-            ax.plot(d["S11 re"], d["S11 im"], **kw)
+            ax.plot(d[f"{y} re"], d[f"{y} im"], **kw)
         else:
             ax.plot(convert(d[c["x"]], c["x"], c["x_unit"]),
-                    convert(d[y], y, c["y_units"].get(y, VARS[y][0])), **kw)
+                    convert(d[y], y, c["y_units"].get(y, units_for(y)[0])), **kw)
     if c["type"] == "Normal":
         ax.set_xscale(c["x_scale"])
         ax.set_yscale(c["y_scale"])
         ax.set_xlabel(f'{c["x"]} ({c["x_unit"]})')
-        ax.set_ylabel(", ".join(f'{y} ({c["y_units"].get(y, VARS[y][0])})' for y in c["y"]))
+        ax.set_ylabel(", ".join(f'{y} ({c["y_units"].get(y, units_for(y)[0])})' for y in c["y"]))
         ax.grid(True, which="both", alpha=0.3)
     ax.set_title(c["name"])
     if combos:
@@ -149,29 +162,35 @@ def editor(pid):
     c["sims"] = st.multiselect("Sims", sims, default=[s for s in c["sims"] if s in sims],
                                key=k + "sims")
 
+    allv = available_vars()
     if c["type"] == "Normal":
+        if c["x"] not in allv:
+            c["x"] = "Frequency"
         cx, cxu, cxs = st.columns(3)
-        c["x"] = cx.selectbox("X axis", list(VARS), index=list(VARS).index(c["x"]), key=k + "x")
-        units = VARS[c["x"]]
+        c["x"] = cx.selectbox("X axis", allv, index=allv.index(c["x"]), key=k + "x")
+        units = units_for(c["x"])
         c["x_unit"] = cxu.selectbox("X unit", units,
                                     index=units.index(c["x_unit"]) if c["x_unit"] in units else 0,
                                     key=k + "xu" + c["x"])
         c["x_scale"] = cxs.selectbox("X scale", ["linear", "log"],
                                      index=["linear", "log"].index(c["x_scale"]), key=k + "xs")
         cy, cys = st.columns([3, 1])
-        c["y"] = cy.multiselect("Y axes", list(VARS), default=c["y"], key=k + "y")
+        c["y"] = cy.multiselect("Y axes", allv, default=[y for y in c["y"] if y in allv],
+                                key=k + "y")
         c["y_scale"] = cys.selectbox("Y scale", ["linear", "log"],
                                      index=["linear", "log"].index(c["y_scale"]), key=k + "ys")
         for y in c["y"]:
-            units = VARS[y]
+            units = units_for(y)
             cur = c["y_units"].get(y, units[0])
             c["y_units"][y] = st.selectbox(f"Unit for {y}", units,
                                            index=units.index(cur) if cur in units else 0,
                                            key=f"{k}yu{y}")
-        combos = [(s, y) for s in c["sims"] for y in c["y"]]
     else:
-        st.caption("Smith diagram plots S11 (real vs imaginary) over smith_diagram.png")
-        combos = [(s, "S11") for s in c["sims"]]
+        sp = available_sparams()
+        c["smith_s"] = st.multiselect("S-parameters", sp,
+                                      default=[p for p in c["smith_s"] if p in sp], key=k + "sp")
+        st.caption("Smith diagram plots each S-parameter (real vs imaginary) over smith_diagram.png")
+    combos = get_combos(c)
 
     st.subheader("Lines")
     for i, (s, y) in enumerate(combos):
@@ -179,7 +198,7 @@ def editor(pid):
         seq = c.get("style_seq", [])
         base = seq[i] if i < len(seq) else {}
         ln = c["lines"].setdefault(key, dict(
-            label=s if c["type"] == "Smith" else f"{s} - {y}",
+            label=s if c["type"] == "Smith" and len(c["smith_s"]) == 1 else f"{s} - {y}",
             color=base.get("color", PALETTE[i % len(PALETTE)]),
             width=base.get("width", 1.5), style=base.get("style", "line"),
             marker_size=base.get("marker_size", 3)))
@@ -200,9 +219,9 @@ def editor(pid):
 # ---------- sidebar: file loading ----------
 with st.sidebar:
     st.header("Files")
-    files = st.file_uploader("Select .s1p files", type=["s1p"], accept_multiple_files=True)
+    files = st.file_uploader("Select Touchstone files (.s1p, .s2p, ...)", type=EXTS, accept_multiple_files=True)
     if files:
-        ss.df = pd.concat([load_s1p(f) for f in files], ignore_index=True)
+        ss.df = pd.concat([load_snp(f) for f in files], ignore_index=True)
     else:
         ss.df = pd.DataFrame()
     for f in files:
